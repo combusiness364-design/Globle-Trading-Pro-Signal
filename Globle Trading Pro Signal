@@ -1,0 +1,123 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import ta
+import ccxt
+from datetime import datetime
+
+st.set_page_config(page_title="Global Trading Pro Signal", layout="wide")
+
+st.title("📈 Global Trading Pro Signal")
+st.caption("Multi-Timeframe Analysis - 6 Confirmations")
+
+# Coin select
+coin = st.selectbox("Select Coin:", ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT", "PEUSDT"])
+timeframe = st.selectbox("Timeframe:", ["1m", "5m", "15m", "1h", "4h", "1d"])
+
+# Data fetch
+@st.cache_data(ttl=60)
+def get_data(symbol, tf):
+    exchange = ccxt.binance()
+    ohlcv = exchange.fetch_ohlcv(symbol, tf, limit=200)
+    df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+    return df
+
+df = get_data(coin, timeframe)
+
+# 6 Confirmations Logic
+score = 0
+signals = []
+
+# 1. EMA
+df['ema20'] = ta.trend.ema_indicator(df['close'], 20)
+df['ema50'] = ta.trend.ema_indicator(df['close'], 50)
+if df['ema20'].iloc[-1] > df['ema50'].iloc[-1]:
+    score += 1
+    signals.append("EMA: Bullish")
+else:
+    signals.append("EMA: Bearish")
+
+# 2. RSI
+df['rsi'] = ta.momentum.rsi(df['close'], 14)
+if df['rsi'].iloc[-1] > 50:
+    score += 1
+    signals.append("RSI: Bullish")
+else:
+    signals.append("RSI: Bearish")
+
+# 3. MACD
+macd = ta.trend.macd(df['close'])
+macd_sig = ta.trend.macd_signal(df['close'])
+if macd.iloc[-1] > macd_sig.iloc[-1]:
+    score += 1
+    signals.append("MACD: Bullish")
+else:
+    signals.append("MACD: Bearish")
+
+# 4. Bollinger
+bb_high = ta.volatility.bollinger_hband(df['close'])
+bb_low = ta.volatility.bollinger_lband(df['close'])
+if df['close'].iloc[-1] > bb_high.iloc[-1]:
+    score += 1
+    signals.append("BB: Overbought")
+elif df['close'].iloc[-1] < bb_low.iloc[-1]:
+    score += 1
+    signals.append("BB: Oversold")
+else:
+    signals.append("BB: Normal")
+
+# 5. Volume
+df['vol_sma'] = df['volume'].rolling(20).mean()
+if df['volume'].iloc[-1] > df['vol_sma'].iloc[-1]:
+    score += 1
+    signals.append("Volume: High")
+else:
+    signals.append("Volume: Low")
+
+# 6. Support/Resistance
+support = df['low'].rolling(20).min().iloc[-1]
+resistance = df['high'].rolling(20).max().iloc[-1]
+if df['close'].iloc[-1] > resistance:
+    score += 1
+    signals.append("Breakout: Up")
+elif df['close'].iloc[-1] < support:
+    score += 1
+    signals.append("Breakdown: Down")
+else:
+    signals.append("Range: Sideways")
+
+# Signal Display
+st.subheader(f"Score: {score}/6")
+st.write(f"Last Price: ${df['close'].iloc[-1]:.2f}")
+
+if score >= 5:
+    st.success("🟢 STRONG BUY SIGNAL")
+    entry = df['close'].iloc[-1]
+    sl = entry * 0.98
+    tp1 = entry * 1.02
+    tp2 = entry * 1.04
+    tp3 = entry * 1.06
+    st.write(f"**Entry:** ${entry:.2f}")
+    st.write(f"**SL:** ${sl:.2f}")
+    st.write(f"**TP1:** ${tp1:.2f} | **TP2:** ${tp2:.2f} | **TP3:** ${tp3:.2f}")
+elif score <= 1:
+    st.error("🔴 STRONG SELL SIGNAL")
+    entry = df['close'].iloc[-1]
+    sl = entry * 1.02
+    tp1 = entry * 0.98
+    tp2 = entry * 0.96
+    tp3 = entry * 0.94
+    st.write(f"**Entry:** ${entry:.2f}")
+    st.write(f"**SL:** ${sl:.2f}")
+    st.write(f"**TP1:** ${tp1:.2f} | **TP2:** ${tp2:.2f} | **TP3:** ${tp3:.2f}")
+else:
+    st.warning("⚠️ NO SIGNAL — Market is Sideways")
+
+st.write("---")
+st.write("**6 Confirmations:**")
+for s in signals:
+    st.write(f"• {s}")
+
+st.markdown("---")
+st.markdown("**Created by Syed Mustafa**")
